@@ -1,0 +1,115 @@
+---
+title: "Confirmation List Break Down"
+output: html_notebook
+---
+
+## Preamble
+Prepare some Notebook library installations so commands are accessible.
+
+```{r preamble, echo=TRUE, message=FALSE, warning=FALSE, include=TRUE, cache=TRUE}
+install.packages("here")
+install.packages("tidyverse")
+install.packages("kableExtra")
+install.packages("janitor")
+```
+
+## Reading the data into memory
+
+The data comes from [Zone4](http://zone4.com) by downloading the list of people registered for a cross country ski day race or a multi-day event like the Alberta Cup. 
+
+
+```{r import csv file, echo=TRUE, message=FALSE, warning=FALSE, cache=TRUE}
+library(here)
+library(tidyverse)
+entries.raw <- read_csv(here("data", "Confirmation List.csv"))
+```
+Once read from the file system into an R variable we can format it as a `tibble` to explore the variables (columns) and the observations (rows) present in it.
+
+```{r visualize rows in file, include=TRUE, warning=FALSE, message=FALSE}
+library(tidyverse)
+(data <- tibble(entries.raw))
+```
+
+```{r names}
+names(data)
+```
+
+Let's clean up the original column names first.
+
+```{r column name cleanup, message=FALSE}
+library(janitor)
+(data_clean_names <- data %>% janitor::clean_names())
+names(data_clean_names)
+```
+
+
+## Establishing the targets
+
+From the visual exploration of the data we see that the data of interest is located as follows:
+```{r data location, echo=FALSE}
+library(kableExtra)
+dt <- tibble(var=c("FirstName","LastName","Club","Classic","Free","Category"),
+            column=c("firstname","lastname","club","sat_feb_19_interval_classic", "sun_feb_20_free_technique_interval", "sat_feb_19_interval_classic"))
+dt %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+The columns of the events for Saturday and Sunday not only contain the categorical values of whether the participant signed up for those events but also the category they belong to.
+
+First we will clean up the column names, then extract the category for each participant, finally we will remove unnecessary columns.
+
+## Data clean up and transformation
+
+```{r clean up data}
+clean <- data_clean_names %>% 
+  select("firstname","lastname","club","sat_feb_19_interval_classic", "sun_feb_20_free_technique_interval") %>%
+  rename("SundayFreeTechnique"= "sun_feb_20_free_technique_interval",
+         "SaturdayClassic" = "sat_feb_19_interval_classic")
+clean <- clean %>% mutate(category1 = str_extract(SaturdayClassic, "^U\\d+(\\s+\\D+)+\\s\\d+-\\d+|^U\\d+(\\s+\\D+)+\\s\\d+(\\s+\\D+)+|^\\D+\\s+.*"),
+                          category2 = str_extract(SundayFreeTechnique, "^U\\d+(\\s+\\D+)+\\s\\d+-\\d+|^U\\d+(\\s+\\D+)+\\s\\d+(\\s+\\D+)+|^\\D+\\s+.*"))
+clean
+```
+Let's remove the rows that have no information at all.
+
+```{r removing empty rows}
+(cleaned <- clean %>% 
+  drop_na(firstname))
+```
+
+Now we can decide on a final category variable based on the two category1 and category2 variables.
+```{r final category deduction}
+cleaned <- cleaned %>% 
+  mutate(category = if_else(is.na(category1) & is.na(category2), "coach/assistant", if_else(!is.na(category1), category1, if_else(!is.na(category2), category2, "unknown"))))
+clean_dt <- cleaned %>% select(-category1, -category2)
+clean_dt
+```
+
+
+The final transformation is to turn the variables for the events as categorical values, that is, if not NA then it is a 1, otherwise it is a 0.
+
+```{r categorical values for participation}
+(clean_dt_final <- clean_dt %>% 
+  mutate(SaturdayClassic = if_else(is.na(SaturdayClassic), 0, 1),
+         SundayFreeTechnique = if_else(is.na(SundayFreeTechnique), 0, 1)))
+```
+
+## Answering quesions about the participants
+
+### How many participants per category?
+
+```{r pariticpants per category}
+library(ggplot2)
+clean_dt_final %>% 
+  group_by(category) %>%
+  summarise(num_registered=sum(SaturdayClassic)) %>%
+  ggplot() +
+  geom_bar(aes(reorder(category, num_registered), num_registered), stat = 'identity') +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = 'Number of entries per category',
+    x = 'Categories') +
+  coord_flip()
+  
+
+```
+
